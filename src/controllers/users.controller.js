@@ -5,12 +5,17 @@ import { createHash, isValidPassword } from "../utils/hashbcrypt.js"
 
 const emailManager = new EmailManager()
 
-export class UsersController{
-    registerAuthenticate = async(req, res) => {
+export class UsersController {
+    
+    registerAuthenticate = async (req, res) => {
         let connection = new Date()
-        if(!req.user){
+        if (!req.user) {
             return res.status(400).send("Invalid credentials")
         }
+
+        req.user.last_connection = connection
+        await req.user.save()
+
         req.session.user = {
             first_name: req.user.first_name,
             last_name: req.user.last_name,
@@ -27,11 +32,11 @@ export class UsersController{
         res.send("hay un problema con la pagina")
     }
 
-    requestPasswordReset = async(req, res) => {
-        const {email} = req.body
-        try{
-            const user = await usersModel.findOne({email})
-            if(!user){
+    requestPasswordReset = async (req, res) => {
+        const { email } = req.body
+        try {
+            const user = await usersModel.findOne({ email })
+            if (!user) {
                 return res.status(404).send("User no encontrado")
             }
             const token = generateToken()
@@ -42,29 +47,28 @@ export class UsersController{
             await user.save()
             await emailManager.sendEmailResetPass(email, user.first_name, token)
             res.render("confirmacion-envio")
-        }
-        catch(error){
+        } catch (error) {
             res.status(500).send("Error en el server.")
         }
     }
 
-    resetPassword = async(req, res) => {
-        const {email, password, token} = req.body
-        try{
-            const user = await usersModel.findOne({email})
-            if(!user){
-                return res.render("resetpass", {error: "user no encontrado."})
+    resetPassword = async (req, res) => {
+        const { email, password, token } = req.body
+        try {
+            const user = await usersModel.findOne({ email })
+            if (!user) {
+                return res.render("resetpass", { error: "user no encontrado." })
             }
             const resetToken = user.resetToken
-            if(!resetToken || resetToken.token !== token){
-                return res.render("getemailpass", {error: "The token is invalid."})
+            if (!resetToken || resetToken.token !== token) {
+                return res.render("getemailpass", { error: "The token is invalid." })
             }
             const fecha = new Date()
-            if(fecha > resetToken.expire){
-                return res.render("getemailpass", {error: "The token has expired."})
+            if (fecha > resetToken.expire) {
+                return res.render("getemailpass", { error: "The token has expired." })
             }
-            if(isValidPassword(password, user)){
-                return res.render("resetpass", {error: "el nuevo password no puede ser igual al anterior."})
+            if (isValidPassword(password, user)) {
+                return res.render("resetpass", { error: "el nuevo password no puede ser igual al anterior." })
             }
 
             user.password = createHash(password)
@@ -72,56 +76,58 @@ export class UsersController{
             await user.save()
 
             return res.redirect("/login")
-        }
-        catch(error){
+        } catch (error) {
             res.status(500).send("Error in the server.")
         }
     }
 
-    changeRolPremium = async(req, res) => {
-        const {uid} = req.params
+    changeRolPremium = async (req, res) => {
+        const { uid } = req.params
         try {
             const user = await usersModel.findById(uid)
-            if(!user) {
+            if (!user) {
                 return res.status(404).send("User no encontrado")
             }
+
             const documentationNeedIt = ["Identificacion", "Comprobante de domicilio", "Comprobante de estado de cuenta"]
             const userDocuments = user.documents.map(doc => doc.name.split('.').slice(0, -1).join('.'))
             const checkDocuments = documentationNeedIt.every(doc => userDocuments.includes(doc))
             console.log(checkDocuments)
-            if(!checkDocuments){
+
+            if (!checkDocuments) {
                 return res.status(404).send("no tienes documentos para ser Premium user.")
             }
+
             const newRol = user.rol === "User" ? "Premium" : "User"
-            const updateRol = await usersModel.findByIdAndUpdate(uid, {rol: newRol})
+            const updateRol = await usersModel.findByIdAndUpdate(uid, { rol: newRol })
             res.json(updateRol)
         } catch (error) {
             res.status(500).send("hay un error en el server.")
         }
     }
 
-    documentationToChangeRol = async(req, res) => {
-        const {uid} = req.params
+    documentationToChangeRol = async (req, res) => {
+        const { uid } = req.params
         const uploadedDocuments = req.files
-        try{
+        try {
             const user = await usersModel.findById(uid)
-            if(!user) {
+            if (!user) {
                 return res.status(404).send("User not found")
             }
-            if(uploadedDocuments){
-                if (uploadedDocuments.document){
+            if (uploadedDocuments) {
+                if (uploadedDocuments.document) {
                     user.documents = user.documents.concat(uploadedDocuments.document.map(doc => ({
                         name: doc.originalname,
                         reference: doc.path
                     })))
                 }
-                if (uploadedDocuments.products){
+                if (uploadedDocuments.products) {
                     user.documents = user.documents.concat(uploadedDocuments.products.map(doc => ({
                         name: doc.originalname,
                         reference: doc.path
                     })))
                 }
-                if (uploadedDocuments.profile){
+                if (uploadedDocuments.profile) {
                     user.documents = user.documents.concat(uploadedDocuments.profile.map(doc => ({
                         name: doc.originalname,
                         reference: doc.path
@@ -130,11 +136,29 @@ export class UsersController{
                 await user.save()
                 res.status(200).send("actualizamos los documentos.")
             }
-        }
-        catch(error){
+        } catch (error) {
             res.status(500).send("hay un error en el server.")
         }
+    }
+
+    admin = async (req, res) => {
+        if (req.user.rol !== "Admin") {
+            return res.status(403).send("Acceso denegado")
         }
+        res.render("admin")
+    }
+    
+    logout = async (req, res) => {
+        try {
+            req.user.last_connection = new Date()
+            await req.user.save()
+        } catch (error) {
+            console.error(error)
+            res.status(500).send("Error interno del servidor")
+            return
+        }
+
+        res.clearCookie("coderCookieToken")
+        res.redirect("/login")
+    }
 }
-
-
